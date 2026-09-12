@@ -1,0 +1,19 @@
+# Python 3.13 기준
+# ctranslate2 는 4.6.0 부터 3.13 휠 제공 (그 이전 버전은 3.13 설치 불가)
+
+# ── YouTube 수집 ────────────────────────────────
+google-api-python-client>=2.100.0   # YouTube Data API v3 (검색·채널·댓글)
+yt-dlp>=2025.1.1                    # 음성 다운로드
+youtube-transcript-api>=1.0.0       # 자막 (1.x 인스턴스 API)
+
+# ── 음성 인식 ───────────────────────────────────
+ctranslate2>=4.6.0                  # 3.13 휠 확보 위해 하한 명시
+faster-whisper>=1.2.0               # large-v3 / large-v3-turbo
+# torch 는 CUDA 버전에 맞춰 별도 설치:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+# ── 데이터 처리 ─────────────────────────────────
+pandas>=2.2.0
+
+# ── 선택: LLM 후처리 (normalize.llm_refine) ─────
+# anthropic>=0.40.0

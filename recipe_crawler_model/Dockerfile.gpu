@@ -1,0 +1,49 @@
+# 유튜브 레시피 크롤러 — GPU(CUDA) 이미지
+#
+# faster-whisper large-v3 를 GPU 로 돌릴 때 사용함. CPU 대비 10배 이상 빠름.
+# ctranslate2 의 CUDA 백엔드는 cuDNN 이 필요해서 cudnn 포함 베이스를 씀.
+#
+# 사전 요구:
+#   - NVIDIA 드라이버 + nvidia-container-toolkit 설치
+#   - 확인: docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu24.04 nvidia-smi
+#
+# 빌드:
+#   docker build -f recipe_crawler_model/Dockerfile.gpu -t ref-recipe-crawler:gpu .
+#
+# 주의: CPU 이미지보다 훨씬 무거움(수 GB). GPU 안 쓸 거면 Dockerfile 쓸 것.
+
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu24.04
+
+# ── Python 3.13 설치 ────────────────────────────────────────────
+# Ubuntu 24.04 기본 파이썬은 3.12 라 deadsnakes PPA 로 3.13 을 설치함
+# (프로젝트 기준을 3.13 으로 맞추기 위함. 3.12 로 충분하면 이 단계 생략 가능)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python3.13 python3.13-venv python3.13-dev \
+        ffmpeg curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# python3.13 을 기본 python 으로 연결 + pip 설치
+RUN ln -sf /usr/bin/python3.13 /usr/local/bin/python \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/cache/huggingface
+
+WORKDIR /workspace
+
+COPY recipe_crawler_model/requirements.txt /tmp/requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r /tmp/requirements.txt \
+    # CUDA 12.4 대응 torch
+    && pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+COPY recipe_crawler_model/ /workspace/recipe_crawler_model/
+RUN mkdir -p /workspace/recipe_data_collection /cache/huggingface
+
+ENTRYPOINT ["python", "-m", "recipe_crawler_model.run_recipe_crawler"]
+CMD ["--help"]
