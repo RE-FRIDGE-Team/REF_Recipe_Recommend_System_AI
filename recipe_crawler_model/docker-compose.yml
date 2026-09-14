@@ -1,0 +1,55 @@
+# docker-compose.yml — 레시피 크롤러 실행 정의
+#
+# 1회성 실행 잡이라 상시 띄우는 서비스가 아니라 run 으로 씀.
+# 실행은 이 파일이 있는 폴더에서:
+#   docker compose build
+#   docker compose run --rm crawler --no-asr --limit 5
+#
+# API 키는 repo 루트의 .env 에 둘 것 (git 제외 대상).
+
+services:
+  # ── CPU 실행 (기본) ────────────────────────────────────────────
+  crawler:
+    build:
+      context: ..                                # repo 루트가 빌드 컨텍스트
+      dockerfile: recipe_crawler_model/Dockerfile
+    image: ref-recipe-crawler:cpu
+    env_file:
+      - ../.env
+    volumes:
+      # 최종 CSV — 호스트에서 바로 열람 가능하게 바인드 마운트
+      - ../recipe_data_collection:/workspace/recipe_data_collection
+      # 체크포인트·임시 음성 — 중단 후 이어서 실행하려면 유지 필요
+      - crawler-data:/workspace/recipe_crawler_model/data
+      # whisper 모델 캐시 — 없으면 실행 때마다 수 GB 재다운로드
+      - whisper-cache:/cache/huggingface
+    working_dir: /workspace
+
+  # ── GPU 실행 (profile 로 분리) ─────────────────────────────────
+  #   docker compose --profile gpu run --rm crawler-gpu --limit 50
+  crawler-gpu:
+    build:
+      context: ..
+      dockerfile: recipe_crawler_model/Dockerfile.gpu
+    image: ref-recipe-crawler:gpu
+    profiles: ["gpu"]
+    env_file:
+      - ../.env
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ../recipe_data_collection:/workspace/recipe_data_collection
+      - crawler-data:/workspace/recipe_crawler_model/data
+      - whisper-cache:/cache/huggingface
+    working_dir: /workspace
+
+volumes:
+  crawler-data:     # 체크포인트 JSONL + 임시 음성
+  whisper-cache:    # faster-whisper 모델 가중치

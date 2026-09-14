@@ -1,13 +1,19 @@
 ### Python ###
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*.egg-info/
 .pytest_cache/
 
 ### 가상환경 ###
 .venv/
 venv/
 env/
+
+### 민감정보 ###
+.env
+*.key
+*.pem
+!.env.example
 
 ### PyCharm / JetBrains ###
 .idea/**/workspace.xml
@@ -23,25 +29,22 @@ env/
 *.iml
 out/
 
-### 민감정보 ###
-.env
-*.key
-*.pem
-
-### 레시피 크롤러 ###
-recipe_crawler_model/data/        # 음성·캐시 (용량 크고 재생성 가능)
+### 레시피 크롤러 작업 파일 ###
+# 임시 음성·체크포인트 — 용량 크고 재생성 가능
+recipe_crawler_model/data/
 
 ### 데이터 산출물 ###
-recipe_data_collection/*.csv      # CSV 를 팀과 공유할 거면 이 줄 삭제
+# CSV 를 팀과 공유할 거면 아래 줄을 지울 것
+recipe_data_collection/*.csv
 !recipe_data_collection/.gitkeep
 
-### 로그/모델 (추천 AI 등, 필요시 유지) ###
-logs/
-*.log
+### 모델·로그 ###
 models/
 *.ckpt
 *.pt
 *.pth
+logs/
+*.log
 
 ### OS ###
 .DS_Store

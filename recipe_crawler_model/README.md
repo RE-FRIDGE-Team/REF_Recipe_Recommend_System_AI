@@ -1,151 +1,283 @@
 # 유튜브 자취요리 레시피 수집기
 
-자취생 대상 유튜브 요리 영상에서 레시피를 수집해 CSV 로 저장함.
-음성 인식(faster-whisper)이 베이스, 자막은 보조.
+RE:FRIDGE 레시피 추천 시스템의 데이터 수집 파트.
+유튜브 요리 영상에서 레시피를 수집·정제해 CSV로 저장한다.
 
-## 폴더 구조
+---
+
+## 1. 폴더 구조
+
 ```
-REF_Classification_For_Ingredient_Recognition/
-├── recipe_crawler_model/                    # 크롤러 코드
-│   ├── crawler_config.py                       # 채널·키워드·모델·스키마 설정
-│   ├── youtube_video_list_collector.py         # 1·2단계 영상목록 수집 + 중복제거
-│   ├── audio_transcriber_subtitle_fetcher.py   # 3단계 음성인식 + 자막
-│   ├── recipe_field_extractor.py               # 4단계 요리명·재료·조리시간 추출
-│   ├── recipe_step_normalizer.py               # 4단계 원문 → 번호 단계 정형화
-│   ├── run_recipe_crawler.py                   # 실행 진입점
+REF_Recipe_Recommend_System_AI/
+├── .env                    # 실제 API 키 (git 제외)
+├── .env.example            # 키 템플릿 (커밋)
+├── .gitignore
+├── .dockerignore
+├── recipe_crawler_model/           # 크롤러 코드
+│   ├── __init__.py
+│   ├── __main__.py                 # CLI 진입점
+│   ├── settings.py                 # 채널·키워드·모델·임계값
+│   ├── schema.py                   # CSV 컬럼 정의 단일 소스
+│   ├── collectors.py               # 영상 목록 수집 (채널/검색)
+│   ├── fetchers.py                 # 원문 수집 (음성 ASR / 자막)
+│   ├── extractors.py               # 필드 추출 (요리명·재료·시간)
+│   ├── ingredient_normalizer.py    # 재료 정규화 + 주재료/양념 분류
+│   ├── processors.py               # 레시피 정제 (규칙 / LLM)
+│   ├── pipeline.py                 # 오케스트레이션
 │   ├── requirements.txt
-│   └── data/                                   # 작업용 (git 제외)
-│       ├── audio/                              # 임시 음성 (처리 후 삭제)
-│       └── cache/                              # 체크포인트 JSONL
-└── recipe_data_collection/                     # 최종 CSV 만 저장
+│   ├── Dockerfile / Dockerfile.gpu
+│   └── docker-compose.yml
+└── recipe_data_collection/         # 최종 CSV만 저장
     └── REF_Youtube_Recipe_20260919_1430.csv
 ```
 
-## 실행
-repo 루트에서 `-m` 으로 실행할 것 (상대 임포트 사용).
+---
+
+## 2. 로컬 실행 (PyCharm, Python 3.13)
+
+### 2-1. 가상환경 + 의존성
 
 ```bash
+# PyCharm: Settings → Project → Python Interpreter
+#          → Add Interpreter → Virtualenv Environment → New (Python 3.13)
+
 pip install -r recipe_crawler_model/requirements.txt
-export YOUTUBE_API_KEY="..."        # Windows: set YOUTUBE_API_KEY=...
 
-python -m recipe_crawler_model.run_recipe_crawler --collect-only        # 목록만
-python -m recipe_crawler_model.run_recipe_crawler --no-asr --limit 20   # 자막만, 빠른 검증
-python -m recipe_crawler_model.run_recipe_crawler                       # 전체
-python -m recipe_crawler_model.run_recipe_crawler --drop-raw            # 원문 제외본
+# torch는 환경에 맞게 별도 설치
+pip install torch --index-url https://download.pytorch.org/whl/cpu    # CPU
+pip install torch --index-url https://download.pytorch.org/whl/cu124  # GPU
 ```
 
-## 환경 (Python 3.13 + PyCharm)
-`ctranslate2` 는 4.6.0 부터 3.13 휠 제공. 그 아래는 3.13 설치 불가하니 하한 유지할 것.
+`ctranslate2`는 4.6.0부터 3.13 휠을 제공한다. 그 아래 버전은 3.13에서 설치가 안 되니 requirements의 하한을 지킬 것.
 
-PyCharm Run Configuration:
-1. Settings → Python Interpreter → Add → Virtualenv (Python 3.13)
-2. Run/Debug Configurations → **Module name** 에 `recipe_crawler_model.run_recipe_crawler`
-   (Script path 아님)
+### 2-2. API 키
+
+```bash
+cp .env.example .env
+```
+`.env`를 열어 `YOUTUBE_API_KEY=` 뒤에 키를 넣는다.
+발급: Google Cloud Console → API 및 서비스 → 사용자 인증 정보 → API 키
+(YouTube Data API v3를 **활성화**해야 한다)
+
+### 2-3. 실행
+
+repo 루트에서 `-m`으로 실행한다(상대 임포트 사용).
+
+```bash
+# ① 목록만 수집해서 쿼터·채널 설정 확인 (ASR 없음, 빠름)
+python -m recipe_crawler_model --collect-only
+
+# ② 자막·설명란만으로 소량 테스트 (ASR 생략 → 수 초)
+python -m recipe_crawler_model --no-asr --limit 5
+
+# ③ 전체 실행 (음성 인식 포함, 영상당 수십 초)
+python -m recipe_crawler_model --limit 50
+
+# ④ 재료명을 재고와 같은 키(PGIN)로 정규화 (권장)
+#    인식 데이터셋 CSV 를 그대로 주면 PGIN 어휘 + GIN→PGIN 매핑이 자동 구성됨
+python -m recipe_crawler_model --pgin-vocab ../recognition_dataset_augmented.csv
+
+# ⑤ 원문 제외하고 저장 (공유용)
+python -m recipe_crawler_model --drop-raw
+```
+
+**PyCharm Run Configuration**
+1. Run → Edit Configurations → `+` → Python
+2. **Module name**에 `recipe_crawler_model` (Script path 아님)
 3. Working directory = repo 루트
-4. Environment variables 에 `YOUTUBE_API_KEY` 등록
+4. Parameters에 `--no-asr --limit 5` 등
 
-의존성은 루트 requirements.txt 와 분리함. 기존 ML 파이프라인은 Docker Python 3.11,
-크롤러는 3.13 이고 faster-whisper/yt-dlp 는 분류 학습에 불필요해서 도커만 무거워짐.
+### 2-4. 전체 옵션
 
-## 도커 실행
+| 옵션 | 설명 |
+|---|---|
+| `--limit N` | 처리할 영상 수 제한 |
+| `--collect-only` | 목록 수집만 하고 종료 |
+| `--refresh-list` | 영상 목록 캐시 무시하고 재수집 |
+| `--no-asr` | 음성 인식 생략 (자막·설명란만) |
+| `--no-comment` | 고정댓글 수집 생략 (쿼터 절약) |
+| `--keep-audio` | 변환 후 음성 파일 보존 |
+| `--processor rule\|llm` | 정제 방식 (llm은 `ANTHROPIC_API_KEY` 필요) |
+| `--drop-raw` | 원문 컬럼 제외하고 저장 |
+| `--pgin-vocab PATH` | **재고 대조용 PGIN 어휘** (인식 데이터셋 CSV 권장) |
 
-기존 ML 파이프라인 이미지(Python 3.11 + JDK)와 분리함. 크롤러는 3.13 + ffmpeg 가 필요하고,
-faster-whisper/yt-dlp 는 분류 학습에 불필요해서 기존 이미지만 무거워지기 때문임.
+---
 
-**준비** — repo 루트에 `.env` 생성 (git 제외 대상):
-```
-YOUTUBE_API_KEY=발급받은키
-```
+## 3. 도커 실행
 
-**CPU 실행** (기본):
 ```bash
 cd recipe_crawler_model
-docker compose -f docker-compose.crawler.yml build
-docker compose -f docker-compose.crawler.yml run --rm crawler --no-asr --limit 5
-docker compose -f docker-compose.crawler.yml run --rm crawler --limit 50
-docker compose -f docker-compose.crawler.yml run --rm crawler --drop-raw
+
+# CPU
+docker compose build
+docker compose run --rm crawler --no-asr --limit 5
+docker compose run --rm crawler --limit 50
+
+# GPU (nvidia-container-toolkit 필요)
+docker compose --profile gpu build crawler-gpu
+docker compose --profile gpu run --rm crawler-gpu --limit 50
 ```
-`run --rm` 뒤에 붙이는 인자가 그대로 CLI 로 전달됨(ENTRYPOINT 방식).
 
-**GPU 실행** — `nvidia-container-toolkit` 필요:
-```bash
-docker compose -f docker-compose.crawler.yml --profile gpu build crawler-gpu
-docker compose -f docker-compose.crawler.yml --profile gpu run --rm crawler-gpu --limit 50
-```
-확인: `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu24.04 nvidia-smi`
+`run --rm` 뒤 인자가 그대로 CLI로 전달된다(ENTRYPOINT 방식).
 
-**볼륨 구성**
+**볼륨**
 
-| 볼륨 | 용도 | 비고 |
-|---|---|---|
-| `../recipe_data_collection` (바인드) | 최종 CSV | 호스트에서 바로 열람 |
-| `crawler-data` | 체크포인트 JSONL + 임시 음성 | 중단 후 이어서 실행하려면 유지 필요 |
-| `whisper-cache` | whisper 모델 가중치 | 없으면 매번 수 GB 재다운로드 |
-
-CSV 는 바인드 마운트라 컨테이너에서 `docker cp` 없이 호스트 `recipe_data_collection/` 에 바로 생김.
-
-**빌드 컨텍스트가 repo 루트인 이유**: `COPY recipe_crawler_model/` 경로를 쓰기 때문.
-루트에 `.dockerignore` 를 반드시 추가할 것(없으면 `results/`, `models/`, `.git` 까지 빌드
-컨텍스트로 전송돼 빌드가 느려짐). 내용은 `dockerignore_for_repo_root.txt` 참고.
-
-**GPU 이미지 주의**: CUDA + cuDNN 베이스라 수 GB 로 무거움. Ubuntu 24.04 기본 파이썬이
-3.12 라 deadsnakes PPA 로 3.13 을 설치함. 3.12 로 충분하면 그 단계를 빼고 단순화 가능함.
-
-## CSV 스키마 (28컬럼, 컬럼명 영어 / 값 한국어)
-
-| 그룹 | 컬럼 |
+| 볼륨 | 용도 |
 |---|---|
-| 식별자 | `video_id` `video_url` `video_title` `channel_name` `channel_id` |
-| 추출 | `dish_name` `ingredients` `ingredients_json` `cook_time_display` `cook_time_min` `servings` |
-| 정형화 | `processed_recipe` `processed_step_count` `processed_source` |
-| 원문 | `recipe_audio` `recipe_subtitle` `description` `pinned_comment` |
-| 품질 | `subtitle_is_manual` `subtitle_lang` `asr_model` `asr_avg_logprob` `extraction_source` `is_pinned_verified` |
-| 메타 | `duration_sec` `published_at` `view_count` `collected_at` |
+| `../recipe_data_collection` (바인드) | 최종 CSV — 호스트에서 바로 열람 |
+| `crawler-data` | 체크포인트·임시 음성 — 중단 후 이어서 실행 |
+| `whisper-cache` | 모델 가중치 — 없으면 매번 수 GB 재다운로드 |
 
-주요 컬럼:
-- `video_id` — 중복제거 키. 제목은 중복되지만 ID 는 불변
-- `subtitle_is_manual` — 자막 신뢰도. 수동(True)/자동(False)/없음(None)
-- `processed_recipe` — 사족 제거한 번호 단계 레시피
-- `processed_source` / `extraction_source` — 어느 원문에서 뽑았는지 (품질 확인용)
-- `asr_avg_logprob` — ASR 품질 신호. 낮으면(≲-1.0) 인식 부정확 가능성
+GPU 확인: `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu24.04 nvidia-smi`
 
-## 정형화 (`processed_recipe`)
-원문의 인사·구독요청·잡담을 걷어내고 조리 문장만 번호 단계로 재구성함.
-불 세기·시간·분량은 보존.
+---
+
+## 4. CSV 스키마 (32컬럼 / 컬럼명 영어, 값 한국어)
+
+### 식별
+`video_id` `video_title` `channel_name` `video_url`
+
+`video_id`가 중복 판정 1차 키다. 제목·채널명은 바뀔 수 있지만 ID는 불변이라 신뢰도가 높다.
+
+### 레시피 핵심
+`recipe_name` `recipe_ingredients` `cook_time` `recipe_processed`
+
+### 추천 시스템 연동 (구조화)
+| 컬럼 | 예시 | 용도 |
+|---|---|---|
+| `ingredients_json` | `[{"name":"목살","amount":"300","unit":"g","role":"main"}]` | 구조화 원본 |
+| `main_ingredients` | `목살\|마늘\|대파` | **재고 매칭 대상 (PGIN 키)** |
+| `seasoning_ingredients` | `간장\|미림\|설탕` | 상비 가정, 매칭 제외 |
+| `main_ingredient_count` | `3` | 매칭률 분모 |
+| `main_ingredient_mediums` | `돼지고기\|채소\|채소` | 대체 판정용 중분류 (main과 순서 일치) |
+| `cook_time_minutes` | `15` | 정렬·필터 |
+| `servings` | `2인분` | |
+
+### 원문
+`recipe_desc` `recipe_comment` `recipe_audio` `recipe_subtitle`
+
+### 품질·출처
+`desc_has_recipe` `comment_has_recipe` `comment_is_uploader` `subtitle_is_manual` `subtitle_lang` `asr_model` `asr_confidence` `ingredients_source` `processed_source` `processed_by`
+
+### 영상 메타
+`duration_sec` `published_at` `view_count` `collected_at`
+
+---
+
+## 5. 추천 시스템과의 연결
+
+수집 단계에서 **재료를 주재료와 양념으로 분리**한다. 추천 로직에서 이게 중요한 이유:
+
+간장·소금·설탕 같은 양념까지 매칭 분모에 넣으면 거의 모든 레시피가 "재료 부족"으로 떨어진다. 양념은 대개 상비 품목이고 유통기한 압박도 적다. 그래서 매칭률은 **주재료 기준**으로 계산해야 추천이 실용적으로 나온다.
+
+```python
+# 추천 쪽에서 이렇게 쓰면 된다
+fridge = {"목살", "마늘", "양파"}
+recipe_mains = set(row["main_ingredients"].split("|"))
+
+matched = fridge & recipe_mains
+ratio = len(matched) / len(recipe_mains)
+
+# ratio == 1.0  → 바로 만들 수 있음
+# 0.5 <= ratio  → 일부 구매 필요
+# ratio < 0.5   → 추천 부적합
+missing = recipe_mains - fridge
+```
+
+**재료명 정규화**도 여기서 처리한다. 재고 대조 키는 **PGIN**(`processed_grocery_item_name`, 491종)이다.
+
+GIN(`grocery_item_name`)은 `란 → 계란`처럼 부정확한 표기가 섞여 있어 매핑 소스로 쓰지 않는다. 대신 PGIN에 딸린 **카테고리(대분류/중분류)**를 함께 싣는다. 실측 결과 PGIN→카테고리는 거의 완전히 일관된다(491종 중 대분류 불일치 1건, 중분류 2건).
 
 ```
-1. 다진 마늘 3큰술이랑 미림 2큰술 간장 4큰술 넣고 파 1대 다져서 섞어주기
-2. 후라이팬에 식용유 3큰술 두르고 중강불로 유지하기
-3. 기름이 달궈지면 목살 올려서 한 면당 1분씩 총 6분 구워주기
-4. 약불로 줄이고 양념 넣어서 5분동안 조려주기
+국내산 돼지고기 목살 → 목살   육류/계란 / 돼지고기
+다진 마늘           → 마늘   채소/곡물류 / 채소
+계란 2개            → 계란   육류/계란 / 계란
+대파(흰 부분)       → 대파   채소/곡물류 / 채소
 ```
 
-번호가 이미 있는 원문(설명란·고정댓글)은 구조를 살리고, 줄글(음성)은 문장을 분리해
-조리 동사·계량 신호가 있는 것만 남김.
+### 카테고리는 '대체'가 아니라 '해석'에 쓴다
 
-**한계**: 구어체 ASR 을 규칙만으로 완벽히 정형화하는 건 불가능함. 설명란 기반이 가장
-깨끗하고 음성 기반은 빗나갈 수 있음. `processed_source` 로 확인 가능.
-품질이 더 필요하면 `recipe_step_normalizer.llm_refine()` 로 LLM 후처리 연결
-(기본 비활성, 호출 비용 있음).
+레시피는 `돼지고기 목살`처럼 카테고리명을 앞에 붙여 쓰는 경우가 많은데, 재고의 PGIN은 `목살`이라 표기가 어긋난다. 카테고리를 단서로 삼아 이런 표기를 같은 PGIN으로 모아준다.
 
-## 추출 우선순위
-고정댓글(검증) → 설명란 → 수동자막 → 음성 → 자동자막
+| 입력 | → PGIN | 해석 방식 |
+|---|---|---|
+| `돼지고기 목살` | `목살` | `category_assisted` |
+| `소고기 등심` | `소 등심` | `category_assisted` |
+| `닭 가슴살` | `닭가슴살` | `exact` (띄어쓰기 무시) |
+| `다진 마늘` | `마늘` | `exact` |
+| `돼지고기` | `돼지고기` | `category` (범주 지칭) |
+| `트러플오일` | `트러플오일` | `unmatched` |
 
-**고정댓글은 API 로 확정 불가.** YouTube Data API v3 에 `isPinned` 필드가 없어
-`order=relevance` 첫 댓글 + 작성자가 채널 주인인지 대조하는 휴리스틱을 씀.
-결과는 `is_pinned_verified` 로 표시. 실제로 레시피 전문은 설명란에 더 많음.
+`소고기 등심`이 대표적이다. PGIN이 `소 등심`이라 단순 부분일치로는 못 잡는데, 중분류 `소고기`로 후보를 좁힌 뒤 `등심`을 맞춰 찾는다.
 
-## API 쿼터
-기본 10,000 units/일. `search.list` 는 호출당 100 units (하루 100회 상한),
-채널 업로드 목록은 `playlistItems` 로 1 unit. 그래서 채널 수집을 먼저 돌리고
-검색은 보충용으로 씀. `--no-pinned` 로 댓글 조회를 끄면 쿼터를 더 아낌.
+**해석 순서**
+1. `exact` — PGIN 직접 일치 (띄어쓰기 차이 무시)
+2. `category_assisted` — 이름에 섞인 카테고리명으로 후보를 좁혀 나머지와 매칭
+3. `partial` — 이름에 포함된 가장 긴 PGIN
+4. `category` — 이름 자체가 카테고리 (특정 품목이 아닌 범주 지칭)
+5. `unmatched` — PGIN 미등재
 
-## 체크포인트
-`data/cache/results.jsonl` 에 건건이 저장돼 중단 후 재실행 시 처리분을 스킵함.
-ASR 이 영상당 수십 초라 이게 중요함.
+방식은 `ingredients_json`의 `match_type`에 항목별로 기록된다. `unresolved_ingredients` 컬럼에는 미등재 재료만 모아둬서, PGIN 어휘를 어디부터 보강할지 바로 알 수 있다.
 
-## 주의
-음성 다운로드는 유튜브 약관상 제한될 수 있음. 내부 연구·분석 목적으로만 쓰고
-원본 음성이나 트랜스크립트 전문은 재배포하지 말 것. 재료·조리시간 같은 사실 정보는
-저작권 대상이 아니지만 영상 내레이션 전문은 표현물이라 다름.
-공개 배포 시 `--drop-raw` 로 원문 컬럼을 뺀 CSV 를 쓸 것.
+### 유사 재료 대체는 아직 미적용
+
+`main_ingredient_mediums`로 중분류를 싣지만, 현 단계에서는 대체 판정에 쓰지 않는다. 중분류 폭이 카테고리마다 너무 달라서다 — `돼지고기`(13종)는 목살↔삼겹살처럼 대체가 성립하지만 `채소`(37종)는 마늘로 대파를 대체할 수 없다. 제대로 하려면 중분류보다 세밀한 유사도 테이블이 필요하고, 이는 추천 시스템 설계가 구체화된 뒤 붙이는 게 맞다.
+
+유통기한 기반 우선순위는 추천 쪽에서 `main_ingredients`와 재고의 유통기한을 조인해 계산하면 된다. 크롤러는 매칭 가능한 키를 제공하는 데까지만 책임진다.
+
+---
+
+## 6. 확장 방법
+
+| 하고 싶은 것 | 방법 |
+|---|---|
+| 채널·키워드 추가 | `settings.py`의 `TARGET_CHANNELS` / `SEARCH_QUERIES` |
+| 새 수집 경로 (재생목록 등) | `collectors.BaseCollector` 상속 → `COLLECTOR_REGISTRY` 등록 |
+| 새 원문 소스 (블로그 등) | `fetchers.BaseFetcher` 상속 → `FETCHER_REGISTRY` 등록 |
+| 새 추출 필드 (난이도·칼로리) | `extractors.BaseExtractor` 상속 → `EXTRACTOR_REGISTRY` 추가 |
+| 정제 방식 교체 | `processors.BaseProcessor` 상속 → `PROCESSOR_REGISTRY` 등록 |
+| 컬럼 추가 | `schema.py`의 `CSV_COLUMNS` + `RecipeRecord` 둘 다 |
+| 소스 우선순위 변경 | `settings.SOURCE_PRIORITY` 순서 조정 |
+| 양념 사전 보강 | `ingredient_normalizer.SEASONINGS` |
+| PGIN 어휘 갱신 | `--pgin-vocab` 에 최신 인식 데이터셋 CSV 지정 |
+
+레지스트리에 등록만 하면 파이프라인이 자동으로 인식하므로, 기존 코드를 고칠 필요가 없다.
+
+---
+
+## 7. 동작 원리 (알아둘 것)
+
+### 소스 우선순위
+```
+고정댓글(업로더 검증) → 설명란 → 음성(ASR) → 자막
+```
+업로더가 정리해 둔 텍스트가 구어체 음성보다 정확하다. `settings.SOURCE_PRIORITY`로 순서를 바꿀 수 있다.
+
+### 고정댓글은 API로 확정할 수 없다
+YouTube Data API v3에 `isPinned` 필드가 없다. `order=relevance`의 첫 댓글이 고정댓글일 가능성이 높다는 휴리스틱을 쓰고, 작성자가 채널 주인과 일치하면 `comment_is_uploader=True`로 표시한다. False인 값은 일반 댓글일 수 있다.
+
+실제로는 **레시피 정리본이 설명란에 있는 경우가 더 많다.** `desc_has_recipe` / `comment_has_recipe` 플래그로 계량 표현·재료 헤더를 검사해 정리본 여부를 판별한다.
+
+### 자막 신뢰도
+`youtube-transcript-api`의 `is_generated`로 수동/자동을 구분한다. 수동 자막은 업로더가 직접 쓴 것이라 신뢰도가 높고, 자동 자막은 발음·잡음에 따라 품질이 들쭉날쭉해서 최하위 순위다.
+
+### API 쿼터
+기본 10,000 units/일. `search.list`는 호출당 **100 units**(하루 100회 상한), `playlistItems`는 **1 unit**이다. 그래서 채널 업로드 목록을 먼저 훑고 검색은 보충용으로 쓴다. `--no-comment`로 댓글 조회를 끄면 더 아낀다.
+
+### 체크포인트
+`recipe_crawler_model/data/cache/results.jsonl`에 건건이 저장된다. 중단 후 재실행하면 처리분을 건너뛴다. ASR이 영상당 수십 초라 이게 중요하다.
+
+### 정제의 한계
+구어체 ASR을 규칙만으로 완벽히 정형화하는 건 불가능하다. 번호가 매겨진 원문(설명란·고정댓글)은 거의 그대로 살릴 수 있지만, 음성 원문은 문장 분리·동작 판별이 빗나갈 수 있다. `processed_source`로 어느 원문에서 뽑았는지 확인할 수 있다.
+
+대량 처리는 규칙 기반으로 1차 정제하고, 결과가 빈약한 건만 `--processor llm`으로 재처리하는 혼합 운영을 권한다. `LLMProcessor`는 규칙 결과가 3단계 미만일 때만 LLM을 호출해 비용을 아낀다.
+
+---
+
+## 8. 저작권
+
+영상 원문(`recipe_audio`, `recipe_subtitle`)은 내레이션 표현물이라 재배포하지 말 것. 재료 목록·조리시간·조리 단계 같은 사실 정보는 저작권 대상이 아니다.
+
+공유·배포용 CSV는 `--drop-raw`로 원문 컬럼을 빼고 만들면 된다. `.gitignore`도 기본적으로 `recipe_data_collection/*.csv`를 제외하도록 해뒀다(팀과 공유할 거면 그 줄을 지울 것).
+
+음성 다운로드는 유튜브 약관상 제한될 수 있다. 수집한 음성은 텍스트 변환 후 자동 삭제된다(`--keep-audio`를 주지 않는 한).

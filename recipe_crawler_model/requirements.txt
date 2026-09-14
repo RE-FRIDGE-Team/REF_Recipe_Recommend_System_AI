@@ -10,10 +10,14 @@ youtube-transcript-api>=1.0.0       # 자막 (1.x 인스턴스 API)
 ctranslate2>=4.6.0                  # 3.13 휠 확보 위해 하한 명시
 faster-whisper>=1.2.0               # large-v3 / large-v3-turbo
 # torch 는 CUDA 버전에 맞춰 별도 설치:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+#   CPU:  pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu124
 
 # ── 데이터 처리 ─────────────────────────────────
 pandas>=2.2.0
 
-# ── 선택: LLM 후처리 (normalize.llm_refine) ─────
+# ── 설정 ────────────────────────────────────────
+python-dotenv>=1.0.0                # .env 자동 로드
+
+# ── 선택: LLM 정제 (--processor llm) ────────────
 # anthropic>=0.40.0

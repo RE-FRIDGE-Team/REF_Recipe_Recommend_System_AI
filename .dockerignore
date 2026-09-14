@@ -1,20 +1,23 @@
+# .dockerignore — 빌드 컨텍스트에서 제외할 항목
+# 빌드 컨텍스트가 repo 루트라 이게 없으면 불필요한 파일까지 전송돼 빌드가 느려짐
+
 .git
 .gitignore
 .idea
 .venv
 venv
 __pycache__/
-*.pyc
+*.py[cod]
 
-# 각 프로젝트의 로컬 데이터/캐시 (이미지에 불필요)
+# 로컬 작업 데이터 (이미지에 불필요)
 recipe_crawler_model/data/
 recipe_data_collection/*.csv
 
-# 문서류 (이미지 크기만 키움)
+# 문서 (이미지 크기만 키움)
 *.md
 docs/
 
-# 환경변수 (절대 이미지에 포함 금지)
+# 환경변수 — 이미지에 절대 포함 금지 (compose 의 env_file 로 주입됨)
 .env
 .env.*
 !.env.example
